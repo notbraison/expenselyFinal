@@ -17,9 +17,12 @@ from django.core.exceptions import ObjectDoesNotExist
 import uuid
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.utils.timezone import now
 import time
 import threading
 from decimal import Decimal
+from datetime import timedelta
+from django.db.models.functions import TruncMonth
 
 def signup_view(request):#signup view for new users
     if request.method == 'POST':
@@ -27,7 +30,7 @@ def signup_view(request):#signup view for new users
         if form.is_valid():
             user = form.save()
             login(request, user)  # Automatically log in the user
-            return redirect('home_page')  # Replace 'home' with your post-login URL name
+            return redirect('home')  
     else:
         form = CustomUserCreationForm()
     return render(request, 'registration/signup.html', {'form': form}) #GET request and page to be displayed
@@ -162,11 +165,18 @@ class ExpenseCreateView(CreateView):
     form_class = ExpenseForm
     success_url = reverse_lazy('core:expense_list')
     template_name = 'core/expense_form.html'
-    
+
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['user'] = self.request.user  # Pass current user to the form
+        return kwargs
+
     def get_formset(self, group, data=None):
+        if not group:
+            return None
         members = group.members.all()
         initial_data = [{'user': member, 'email': member.email} for member in members]
-        
+
         ExpenseParticipantFormSet = modelformset_factory(
             ExpenseParticipant,
             form=ExpenseParticipantForm,
@@ -195,27 +205,28 @@ class ExpenseCreateView(CreateView):
         self.object = None
         form = self.get_form()
         group = Group.objects.filter(id=request.POST.get('group')).first()
-        formset = self.get_formset(group, data=request.POST)
-        
-        if form.is_valid() and formset.is_valid():
+        formset = self.get_formset(group, data=request.POST) if group else None
+
+        if form.is_valid() and (formset is None or formset.is_valid()):
             expense = form.save(commit=False)
             expense.paid_by = request.user  # assign current user here
             expense.save()
             participants = []
             total_share = 0
-            for participant_form in formset:
-                participant = participant_form.save(commit=False)
-                participant.expense = expense
-                total_share += participant.share or 0
-                participant.save()
-                participants.append(participant.user) 
+            if formset:
+                for participant_form in formset:
+                    participant = participant_form.save(commit=False)
+                    participant.expense = expense
+                    total_share += participant.share or 0
+                    participant.save()
+                    participants.append(participant.user)
 
-            expense.participants.set(participants) 
+                expense.participants.set(participants)
 
-            if total_share != expense.amount:
-                form.add_error(None, "Total shares must equal the expense amount.")
-                expense.delete()  # Rollback
-                return self.form_invalid(form)
+                if total_share != expense.amount:
+                    form.add_error(None, "Total shares must equal the expense amount.")
+                    expense.delete()  # Rollback
+                    return self.form_invalid(form)
             return self.form_valid(form)
         return self.form_invalid(form)
 
@@ -326,7 +337,7 @@ def make_payment(request):
     try:
         payment_method = PaymentMethod.objects.get(user=user, provider=provider)
     except PaymentMethod.DoesNotExist:
-        return redirect('core:add_payment_method')  # or show an error page
+        return redirect('core:payment_method_create')  # or show an error page
 
     payment = Payment.objects.create(
         expense=expense,
@@ -397,3 +408,52 @@ def profile(request):
         form = CustomUserUpdateForm(instance=user)
 
     return render(request, 'core/profile.html', {'form': form, 'user': user})
+
+@login_required
+def user_report(request):
+    user = request.user
+    
+    # Summary stats
+    total_expenses = Expense.objects.filter(paid_by=user).aggregate(total=Sum('amount'))['total'] or 0
+    total_groups = user.user_groups.count()
+    total_payments = Payment.objects.filter(payer=user).count()
+    total_pending_payments = Payment.objects.filter(payer=user, status='PENDING').count()
+    
+    # Recent expenses with status
+    recent_expenses = Expense.objects.filter(paid_by=user).order_by('-date')[:5]
+    
+    # Recent payments
+    recent_payments = Payment.objects.filter(payer=user).order_by('-timestamp')[:5]
+
+    # Groups user belongs to
+    groups = user.user_groups.all()
+    
+    # Prepare data for Chart: sum of expenses by month for last 6 months
+    from django.db.models.functions import TruncMonth
+    six_months_ago = now() - timedelta(days=180)
+    expenses_by_month = (
+        Expense.objects
+        .filter(paid_by=user, date__gte=six_months_ago)
+        .annotate(month=TruncMonth('date'))
+        .values('month')
+        .annotate(total=Sum('amount'))
+        .order_by('month')
+    )
+
+    # Format data for Chart.js
+    chart_labels = [e['month'].strftime('%b %Y') for e in expenses_by_month]
+    chart_data = [float(e['total']) for e in expenses_by_month]
+
+    context = {
+        'total_expenses': total_expenses,
+        'total_groups': total_groups,
+        'total_payments': total_payments,
+        'total_pending_payments': total_pending_payments,
+        'recent_expenses': recent_expenses,
+        'recent_payments': recent_payments,
+        'groups': groups,
+        'chart_labels': chart_labels,
+        'chart_data': chart_data,
+    }
+    
+    return render(request, 'core/user_report.html', context)

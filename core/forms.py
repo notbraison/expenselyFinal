@@ -44,7 +44,11 @@ class CustomAuthenticationForm(AuthenticationForm):
 class ExpenseForm(forms.ModelForm):
     class Meta:
         model = Expense
-        fields = ['group', 'amount', 'currency', 'description', 'category']
+        fields = ['group', 'amount', 'currency', 'description', 'category','type','frequency']
+        widgets = {
+            'type': forms.Select(attrs={'class': 'form-control', 'id': 'id_type'}),
+            'frequency': forms.Select(attrs={'class': 'form-control', 'id': 'id_frequency'}),
+        }
 
     def __init__(self, *args, **kwargs):
         user = kwargs.pop('user', None)
@@ -101,12 +105,60 @@ ExpenseParticipantFormSet = inlineformset_factory(
 
 
 class PaymentMethodForm(forms.ModelForm):
+    # This will be a plain CharField to take user input as text
+    details_text = forms.CharField(
+        label='Details',
+        widget=forms.Textarea(attrs={'rows': 3, 'placeholder': 'Enter details here'}),
+        help_text='Phone number for M-Pesa, Email for PayPal, Account ID for Stripe'
+    )
+
     class Meta:
         model = PaymentMethod
-        fields = ['provider', 'details']
-        widgets = {
-            'details': forms.Textarea(attrs={'rows': 3, 'placeholder': '{"phone": "0712345678"}'}),
-        }
+        fields = ['provider', 'details_text', 'is_default']
+
+    def __init__(self, *args, **kwargs):
+        # On edit, populate details_text from JSON field
+        super().__init__(*args, **kwargs)
+        if self.instance and self.instance.details:
+            if self.instance.provider == 'MPESA':
+                self.initial['details_text'] = self.instance.details.get('phone', '')
+            elif self.instance.provider == 'PAYPAL':
+                self.initial['details_text'] = self.instance.details.get('email', '')
+            elif self.instance.provider == 'STRIPE':
+                self.initial['details_text'] = self.instance.details.get('account_id', '')
+
+    def clean(self):
+        cleaned_data = super().clean()
+        provider = cleaned_data.get('provider')
+        details_text = cleaned_data.get('details_text')
+
+        if provider == 'MPESA':
+            # Simple validation for phone number (can be improved)
+            if not details_text or not details_text.isdigit():
+                self.add_error('details_text', 'Enter a valid phone number for M-Pesa.')
+            else:
+                cleaned_data['details'] = {'phone': details_text}
+
+        elif provider == 'PAYPAL':
+            # Simple email validation (you can use EmailField validator)
+            if not details_text or '@' not in details_text:
+                self.add_error('details_text', 'Enter a valid email address for PayPal.')
+            else:
+                cleaned_data['details'] = {'email': details_text}
+
+        elif provider == 'STRIPE':
+            # Assume account_id or other identifier
+            if not details_text:
+                self.add_error('details_text', 'Enter the Stripe account ID.')
+            else:
+                cleaned_data['details'] = {'account_id': details_text}
+
+        return cleaned_data
+
+    def save(self, commit=True):
+        # Remove details_text before saving to model (details is JSONField)
+        self.instance.details = self.cleaned_data.get('details', {})
+        return super().save(commit=commit)
 
 
 class PaymentForm(forms.ModelForm):

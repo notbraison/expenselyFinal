@@ -11,70 +11,228 @@
             <div class="card-body">
               <form method="post" id="expenseForm">
                 {% csrf_token %}
-                {{ form|crispy }}
                 
-                <div class="mt-4">
-                    <h5>Participants</h5>
-                    <div id="participant-forms">
-                        {{ formset.management_form }}
-                        {% for form in formset %}
-                            <div class="participant-form border p-2 mb-2">
-                                {% if form.email.value %}
-                                    <label>Participant: {{ form.email.value }}</label>
-                                {% endif %}
-                                {{ form.user }}
-                                {{ form.share|as_crispy_field }}
-                            </div>
+                {# Manually render the group dropdown with the extra option #}
+                <div class="mb-3">
+                    <label for="id_group" class="form-label">Group</label>
+                    <select name="group" id="id_group" class="form-control">
+                        <option value="">Select a group</option>
+                        {% for group in form.fields.group.queryset %}
+                            <option value="{{ group.pk }}" {% if group.pk == form.initial.group %}selected{% endif %}>{{ group.name }}</option>
                         {% endfor %}
-                    </div>
+                        <option value="create_new">+ Create New Group</option>
+                    </select>
+                    {% if form.group.errors %}
+                      <div class="text-danger">{{ form.group.errors }}</div>
+                    {% endif %}
                 </div>
+
+                <div class="mb-3">
+  <label for="id_type" class="form-label">Expense Type</label>
+  {{ form.type|as_crispy_field }}
+</div>
+
+<div class="mb-3" id="frequency-wrapper" style="display: none;">
+  <label for="id_frequency" class="form-label">Recurring Frequency</label>
+  {{ form.frequency|as_crispy_field }}
+</div>
+
+{# Render the rest of the form fields normally but exclude group, type, and frequency #}
+{% for field in form %}
+    {% if field.name != 'group' and field.name != 'type' and field.name != 'frequency' %}
+
+        {{ field|as_crispy_field }}
+    {% endif %}
+{% endfor %}
+                <div class="mt-4 d-flex justify-content-between align-items-center">
+    <h5>Participants</h5>
+    <!-- Split options dropdown -->
+    <div class="form-group">
+        <label for="splitOption" class="form-label">Split Shares</label>
+        <select id="splitOption" class="form-select">
+            <option value="manual" selected>Manual</option>
+            <option value="equal">Split Equally</option>
+            <option value="percentage">Split by Percentage</option>
+            <!-- You can add more options here -->
+        </select>
+    </div>
+</div>
+
+<div id="participant-forms">
+    {{ formset.management_form }}
+    {% for form in formset %}
+        <div class="participant-form border p-2 mb-2 d-flex justify-content-between align-items-center">
+            <div>
+                {% if form.email.value %}
+                    <label>Participant: {{ form.email.value }}</label>
+                {% endif %}
+                {{ form.user }}
+            </div>
+            <div style="width: 150px;">
+                {{ form.share|as_crispy_field }}
+            </div>
+        </div>
+    {% endfor %}
+</div>
+
                 
                 <button type="submit" class="btn btn-success mt-3">Save Expense</button>
-            </form>
+              </form>
             </div>
         </div>
     </div>
 </div>
 
-<script>
-  document.addEventListener('DOMContentLoaded', function() {
-    const groupSelect = document.getElementById('id_group');
-    const participantFormsContainer = document.getElementById('participant-forms');
+<script>document.addEventListener('DOMContentLoaded', function() {
+  const groupSelect = document.getElementById('id_group');
+  const participantFormsContainer = document.getElementById('participant-forms');
+  const splitOption = document.getElementById('splitOption');
+  const expenseAmountInput = document.getElementById('id_amount');
 
-    async function loadParticipantForms() {
-        const groupId = groupSelect.value;
-        if (!groupId) {
-            participantFormsContainer.innerHTML = '';
-            return;
-        }
-
-        try {
-            const response = await fetch(`/core/expenses/load-participant-forms/?group=${groupId}`);
-            
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(errorData.error || 'Failed to load participants');
-            }
-
-            const html = await response.text();
-            participantFormsContainer.innerHTML = html;
-            
-        } catch (error) {
-            console.error('Error loading participants:', error);
-            participantFormsContainer.innerHTML = `
-                <div class="alert alert-danger">
-                    Error loading participants: ${error.message}
-                </div>
-            `;
-        }
+  async function loadParticipantForms() {
+    const groupId = groupSelect.value;
+    if (!groupId || groupId === 'create_new') {
+      participantFormsContainer.innerHTML = '';
+      return;
     }
-
-    groupSelect.addEventListener('change', loadParticipantForms);
-    
-    // Initial load if group is pre-selected
-    if (groupSelect.value) {
-        loadParticipantForms();
+    try {
+      const response = await fetch(`/core/expenses/load-participant-forms/?group=${groupId}`);
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to load participants');
+      }
+      const html = await response.text();
+      participantFormsContainer.innerHTML = html;
+      attachSplitListeners(); // Attach listeners after loading new participants
+    } catch (error) {
+      console.error('Error loading participants:', error);
+      participantFormsContainer.innerHTML = `
+        <div class="alert alert-danger">
+          Error loading participants: ${error.message}
+        </div>
+      `;
     }
+  }
+
+  function attachSplitListeners() {
+    // Re-query all participant forms
+    const participantForms = document.querySelectorAll('.participant-form');
+
+    // Add event listeners for percentage inputs
+    participantForms.forEach(formDiv => {
+      const pctInput = formDiv.querySelector('.percentage-input');
+      if (!pctInput) return;
+      pctInput.addEventListener('input', function() {
+        if (splitOption.value === 'percentage') {
+          splitByPercentage();
+        }
+      });
+    });
+
+    // Trigger share recalculation on amount change
+    expenseAmountInput.addEventListener('input', () => {
+      if (splitOption.value === 'equal') {
+        splitEqually();
+      } else if (splitOption.value === 'percentage') {
+        splitByPercentage();
+      }
+    });
+  }
+
+  function splitEqually() {
+    const amount = parseFloat(expenseAmountInput.value) || 0;
+    const participantForms = document.querySelectorAll('.participant-form');
+    const count = participantForms.length;
+    if (count === 0) return;
+
+    const equalShare = (amount / count).toFixed(2);
+
+    participantForms.forEach(formDiv => {
+      const shareInput = formDiv.querySelector('input[name$="-share"]');
+      const pctInput = formDiv.querySelector('.percentage-input');
+      shareInput.value = equalShare;
+      pctInput.value = '';
+      pctInput.classList.add('d-none');
+    });
+  }
+
+  function splitByPercentage() {
+    const amount = parseFloat(expenseAmountInput.value) || 0;
+    const participantForms = document.querySelectorAll('.participant-form');
+    let totalPct = 0;
+
+    participantForms.forEach(formDiv => {
+      const pctInput = formDiv.querySelector('.percentage-input');
+      if (!pctInput) return;
+      pctInput.classList.remove('d-none');
+      const pct = parseFloat(pctInput.value) || 0;
+      totalPct += pct;
+    });
+
+    if (totalPct > 0) {
+      participantForms.forEach(formDiv => {
+        const shareInput = formDiv.querySelector('input[name$="-share"]');
+        const pctInput = formDiv.querySelector('.percentage-input');
+        const pct = parseFloat(pctInput.value) || 0;
+        const share = ((pct / totalPct) * amount).toFixed(2);
+        shareInput.value = share;
+      });
+    } else {
+      participantForms.forEach(formDiv => {
+        const shareInput = formDiv.querySelector('input[name$="-share"]');
+        shareInput.value = '';
+      });
+    }
+  }
+
+  function resetShares() {
+    const participantForms = document.querySelectorAll('.participant-form');
+    participantForms.forEach(formDiv => {
+      const shareInput = formDiv.querySelector('input[name$="-share"]');
+      const pctInput = formDiv.querySelector('.percentage-input');
+      shareInput.value = '';
+      pctInput.value = '';
+      pctInput.classList.add('d-none');
+    });
+  }
+
+  splitOption.addEventListener('change', function() {
+    if (this.value === 'equal') {
+      splitEqually();
+    } else if (this.value === 'percentage') {
+      splitByPercentage();
+    } else {
+      resetShares();
+    }
+  });
+
+  groupSelect.addEventListener('change', function() {
+    if (this.value === 'create_new') {
+      window.location.href = "{% url 'core:group_create' %}";
+    } else {
+      loadParticipantForms();
+    }
+  });
+
+  // Initial load if group is pre-selected and not "create_new"
+  if (groupSelect.value && groupSelect.value !== 'create_new') {
+    loadParticipantForms();
+  }
+
+  const typeSelect = document.getElementById('id_type');
+  const freqWrapper = document.getElementById('frequency-wrapper');
+
+  function toggleFrequency() {
+    if (typeSelect.value === 'RECURRING') {
+      freqWrapper.style.display = 'block';
+    } else {
+      freqWrapper.style.display = 'none';
+      document.getElementById('id_frequency').value = ''; // reset
+    }
+  }
+
+  typeSelect.addEventListener('change', toggleFrequency);
+  toggleFrequency();  // run on page load
 });
 </script>
 {% endblock %}

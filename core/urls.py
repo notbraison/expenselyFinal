@@ -33,5 +33,8 @@ urlpatterns = [
     
     #profile
     path('profile/', profile, name='profile'),
+    
+    #user report
+     path('user-report/', views.user_report, name='user_report'),
 
 ]

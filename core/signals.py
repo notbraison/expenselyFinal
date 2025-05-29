@@ -1,7 +1,25 @@
 from django.db.models.signals import post_save
 from django.dispatch import receiver
 from django.contrib.contenttypes.models import ContentType
-from core.models import Expense,ExpenseParticipant,Notification
+from core.models import Expense,ExpenseParticipant,Notification,PaymentMethod, Payment
+from datetime import timedelta
+from dateutil.relativedelta import relativedelta  # pip install python-dateutil
+
+@receiver(post_save, sender=Expense)
+def create_initial_payment(sender, instance, created, **kwargs):
+    if created:
+        payment_method = PaymentMethod.objects.filter(user=instance.paid_by, provider='MPESA').first()
+        if not payment_method:
+            # Optional: you can log, raise error, or skip creating payment here
+            return
+
+        Payment.objects.create(
+            expense=instance,
+            payer=instance.paid_by,
+            amount=instance.amount,
+            payment_method=payment_method,  # Must be PaymentMethod instance
+            status='PENDING',
+        )
 
 
 @receiver(post_save, sender=Expense)
@@ -69,3 +87,92 @@ def notify_pending_payment(sender, instance, created, **kwargs):
                 related_object_id=expense.id,
                 related_content_type=content_type,
             )
+            
+@receiver(post_save, sender=Expense)
+def create_recurring_expenses(sender, instance, created, **kwargs):
+    if not created:
+        return  # Only act on newly created expenses
+    
+    if instance.is_generated:
+        return  # Skip generated expenses to avoid recursion
+    
+    if instance.type != 'RECURRING':
+        return  # Only for recurring expenses
+    
+    # Get tracking period settings (with defaults for backward compatibility)
+    tracking_duration = getattr(instance, 'tracking_duration', 3)  # Default 3 periods
+    tracking_period = getattr(instance, 'tracking_period', 'MONTHLY')  # Default MONTHLY
+    custom_period_days = getattr(instance, 'custom_period_days', None)
+    
+    freq_map = {
+        'DAILY': timedelta(days=1),
+        'WEEKLY': timedelta(weeks=1),
+        'MONTHLY': relativedelta(months=1),
+    }
+    
+    # Calculate how far ahead to track
+    def get_tracking_limit():
+        if tracking_period == 'DAILY':
+            return timedelta(days=tracking_duration)
+        elif tracking_period == 'WEEKLY':
+            return timedelta(weeks=tracking_duration)
+        elif tracking_period == 'MONTHLY':
+            return relativedelta(months=tracking_duration)
+        elif tracking_period == 'CUSTOM' and custom_period_days:
+            # Custom period: tracking_duration * custom_period_days
+            return timedelta(days=tracking_duration * custom_period_days)
+        else:
+            # Fallback to original behavior (3 instances)
+            return None
+    
+    recurrence_delta = freq_map.get(instance.frequency)
+    tracking_limit = get_tracking_limit()
+    
+    if not recurrence_delta:
+        return  # Invalid frequency or none selected
+    
+    next_date = instance.date + recurrence_delta
+    expenses_to_create = []
+    
+    if tracking_limit:
+        # New behavior: create based on tracking period
+        end_date = instance.date + tracking_limit
+        
+        while next_date <= end_date:
+            expenses_to_create.append(Expense(
+                group=instance.group,
+                amount=instance.amount,
+                currency=instance.currency,
+                description=instance.description,
+                category=instance.category,
+                paid_by=instance.paid_by,
+                date=next_date,
+                type='RECURRING',
+                frequency=instance.frequency,
+                is_generated=True,  # This prevents infinite recursion
+                # Copy tracking settings if they exist
+                tracking_duration=tracking_duration if hasattr(instance, 'tracking_duration') else None,
+                tracking_period=tracking_period if hasattr(instance, 'tracking_period') else None,
+                custom_period_days=custom_period_days if hasattr(instance, 'custom_period_days') else None,
+            ))
+            next_date += recurrence_delta
+    else:
+        # Fallback to original behavior: create 3 future instances
+        for _ in range(3):
+            expenses_to_create.append(Expense(
+                group=instance.group,
+                amount=instance.amount,
+                currency=instance.currency,
+                description=instance.description,
+                category=instance.category,
+                paid_by=instance.paid_by,
+                date=next_date,
+                type='RECURRING',
+                frequency=instance.frequency,
+                is_generated=True,  # This prevents infinite recursion
+            ))
+            next_date += recurrence_delta
+    
+    # Bulk create for better performance
+    if expenses_to_create:
+        Expense.objects.bulk_create(expenses_to_create)

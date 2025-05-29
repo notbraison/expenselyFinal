@@ -60,8 +60,18 @@ class Group(models.Model):
 class Expense(models.Model):
     CURRENCIES = (('USD', 'USD'), ('KES', 'KES'), ('EUR', 'EUR'))#select dropdowns
     CATEGORIES = (('FOOD', 'Food'), ('TRAVEL', 'Travel'), ('RENT', 'Rent'),('BUSINESS','Business'), ('OTHER', 'Other'))
+    TYPE_CHOICES = (
+        ('ONE_TIME', 'One-time'),
+        ('RECURRING', 'Recurring'),
+    )
+    FREQUENCY_CHOICES = (
+        ('DAILY', 'Daily'),
+        ('WEEKLY', 'Weekly'),
+        ('MONTHLY', 'Monthly'),
+    )
 
     group = models.ForeignKey(Group, on_delete=models.CASCADE)
+    is_generated = models.BooleanField(default=False)
     amount = models.DecimalField(max_digits=10, decimal_places=2)
     currency = models.CharField(max_length=3, choices=CURRENCIES)
     description = models.TextField()
@@ -72,12 +82,23 @@ class Expense(models.Model):
         related_name='expenses_paid'  
     )
     date = models.DateTimeField(auto_now_add=True)
+    
     participants = models.ManyToManyField(  #many participants in a many diff expenses
         CustomUser, 
         through='ExpenseParticipant',  #expense created , expense participants table created 
         related_name='expenses_participated'  
     )
+    type = models.CharField(max_length=20, choices=TYPE_CHOICES, default='ONE_TIME')
+    frequency = models.CharField(max_length=10, choices=FREQUENCY_CHOICES, blank=True, null=True)
 
+    # Add a clean method to ensure frequency is set if type is recurring
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        if self.type == 'RECURRING' and not self.frequency:
+            raise ValidationError('Frequency must be set for recurring expenses.')
+        if self.type == 'ONE_TIME' and self.frequency:
+            raise ValidationError('Frequency should be empty for one-time expenses.')
+        
     def __str__(self):
         return f"{self.description} - {self.amount}"
 
@@ -103,11 +124,22 @@ class PaymentMethod(models.Model):
         related_name='payment_methods'  
     )
     provider = models.CharField(max_length=20, choices=PROVIDERS)
-    details = models.JSONField()  # Store provider-specific data , 
+    details = models.JSONField()  # structured data
     is_default = models.BooleanField(default=False)
 
     def __str__(self):
         return f"{self.user}'s {self.provider}"
+
+    def get_details_display(self):
+        # Return string representation depending on provider
+        if self.provider == 'MPESA':
+            return self.details.get('phone', '')
+        elif self.provider == 'PAYPAL':
+            return self.details.get('email', '')
+        elif self.provider == 'STRIPE':
+            return self.details.get('account_id', '')  # Or whatever key Stripe uses
+        return str(self.details)
+
 
 class Payment(models.Model):
     STATUS_CHOICES = (('PENDING', 'Pending'), ('COMPLETED', 'Completed'), ('FAILED', 'Failed'))

@@ -1,0 +1,158 @@
+{% extends "core/base.html" %} {% load humanize %} {% block content %}
+<div class="d2c_main p-4 ps-lg-3">
+  <h2>User Report</h2>
+
+  <div class="row mb-4">
+    <!-- Summary Cards -->
+    <div class="col-md-3">
+      <div class="card text-white bg-primary mb-3">
+        <div class="card-body">
+          <h5 class="card-title">Total Expenses Paid</h5>
+          <p class="card-text">
+            Ksh. {{ total_expenses|floatformat:2|intcomma }}
+          </p>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card text-white bg-success mb-3">
+        <div class="card-body">
+          <h5 class="card-title">Groups Joined</h5>
+          <p class="card-text">{{ total_groups }}</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card text-white bg-info mb-3">
+        <div class="card-body">
+          <h5 class="card-title">Payments Made</h5>
+          <p class="card-text">{{ total_payments }}</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-3">
+      <div class="card text-white bg-warning mb-3">
+        <div class="card-body">
+          <h5 class="card-title">Pending Payments</h5>
+          <p class="card-text">{{ total_pending_payments }}</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Expense Over Time Chart -->
+  <div class="card mb-4">
+    <div class="card-header">Expenses Over Last 6 Months</div>
+    <div class="card-body">
+      <canvas id="expenseChart" height="100"></canvas>
+    </div>
+  </div>
+
+  <!-- Recent Expenses -->
+  <div class="card mb-4">
+    <div class="card-header">Recent Expenses</div>
+    <div class="card-body">
+      <ul class="list-group">
+        {% for expense in recent_expenses %}
+        <li
+          class="list-group-item d-flex justify-content-between align-items-center"
+        >
+          <div>
+            <strong>{{ expense.description }}</strong><br />
+            <small
+              >{{ expense.group.name }} &middot; {{ expense.category }} &middot;
+              {{ expense.date|date:"M d, Y" }}</small
+            >
+          </div>
+          <span
+            class="badge {% if expense.type == 'RECURRING' %}bg-info {% else %}bg-secondary{% endif %}"
+          >
+            {{ expense.get_type_display }}
+          </span>
+        </li>
+        {% empty %}
+        <li class="list-group-item text-muted">No recent expenses.</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+
+  <!-- Recent Payments -->
+  <div class="card mb-4">
+    <div class="card-header">Recent Payments</div>
+    <div class="card-body">
+      <ul class="list-group">
+        {% for payment in recent_payments %}
+        <li
+          class="list-group-item d-flex justify-content-between align-items-center"
+        >
+          <div>
+            <strong>{{ payment.expense.description }}</strong><br />
+            <small
+              >{{ payment.timestamp|date:"M d, Y H:i" }} &middot; Status: {{
+              payment.get_status_display }}</small
+            >
+          </div>
+          <span
+            class="badge {% if payment.status == 'COMPLETED' %}bg-success {% elif payment.status == 'PENDING' %}bg-warning {% else %}bg-danger{% endif %}"
+          >
+            {{ payment.get_status_display }}
+          </span>
+        </li>
+        {% empty %}
+        <li class="list-group-item text-muted">No recent payments.</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+
+  <!-- Groups -->
+  <div class="card mb-4">
+    <div class="card-header">Groups You Belong To</div>
+    <div class="card-body">
+      <ul class="list-group">
+        {% for group in groups %}
+        <li class="list-group-item">
+          <strong>{{ group.name }}</strong><br />
+          <small>{{ group.description|default:"No description" }}</small>
+        </li>
+        {% empty %}
+        <li class="list-group-item text-muted">
+          You are not a member of any groups.
+        </li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- Chart.js script -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+  const ctx = document.getElementById('expenseChart').getContext('2d');
+  const expenseChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: {{ chart_labels|safe }},
+      datasets: [{
+        label: 'Expenses',
+        data: {{ chart_data|safe }},
+        fill: false,
+        borderColor: 'rgb(75, 192, 192)',
+        tension: 0.1
+      }]
+    },
+    options: {
+      responsive: true,
+      plugins: {
+        legend: { position: 'top' },
+      },
+      scales: {
+        y: { beginAtZero: true }
+      }
+    }
+  });
+</script>
+{% endblock %}
+<!-- This template displays a user report with various statistics and charts -->
+<!-- The report includes total expenses, groups joined, payments made, and pending payments -->

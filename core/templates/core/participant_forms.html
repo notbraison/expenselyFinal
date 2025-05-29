@@ -1,26 +1,35 @@
-   {% load crispy_forms_tags %}
-   {{ formset.management_form }}
-    {% for form in formset %}
-        <div class="participant-form border p-2 mb-2">
-            <div class="d-flex justify-content-between align-items-center">
-                <div>
-                    <strong>
-                        {% if form.initial.email %}
-                            {{ form.initial.email }}
-                        {% elif form.instance.user %}
-                            {{ form.instance.user.email }}
-                        {% else %}
-                            Unknown user
-                        {% endif %}
-                    </strong>
-                    {{ form.user }}  {# hidden input #}
-                </div>
-                <div style="width: 150px;">
-                    {{ form.share|as_crispy_field }}
-                </div>
-            </div>
-            {% if form.share.errors %}
-                <div class="text-danger">{{ form.share.errors }}</div>
-            {% endif %}
-        </div>
-    {% endfor %}
+{% load crispy_forms_tags %}
+{{ formset.management_form }}
+{% for form in formset %}
+  <div class="participant-form border p-2 mb-2 d-flex justify-content-between align-items-center">
+    <div>
+      <strong>
+        {% if form.initial.email %}
+          {{ form.initial.email }}
+        {% elif form.instance.user %}
+          {{ form.instance.user.email }}
+        {% else %}
+          Unknown user
+        {% endif %}
+      </strong>
+      {{ form.user }}  {# hidden input #}
+    </div>
+    <div class="d-flex align-items-center" style="gap: 10px;">
+      <div style="width: 150px;">
+        {{ form.share|as_crispy_field }}
+      </div>
+      <input
+        type="number"
+        step="0.01"
+        min="0"
+        max="100"
+        class="form-control percentage-input d-none"
+        placeholder="%"
+        style="width: 100px;"
+      />
+    </div>
+  </div>
+  {% if form.share.errors %}
+    <div class="text-danger">{{ form.share.errors }}</div>
+  {% endif %}
+{% endfor %}
