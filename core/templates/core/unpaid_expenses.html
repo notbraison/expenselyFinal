@@ -1,0 +1,38 @@
+{% extends "core/base.html" %} 
+{% load humanize %} 
+{% load custom_filters %} 
+
+{% block content %}
+<div class="d2c_main p-4 ps-lg-3">
+  <h2>Expenses You Paid with Pending Payments</h2>
+
+  <div class="card h-100">
+    <div class="card-body">
+      {% if expenses_with_unpaid %}
+      <ul class="list-group">
+        {% for expense in expenses_with_unpaid %}
+        <li class="list-group-item d-flex flex-column {% if expense.unpaid_participants %}list-group-item-warning{% else %}list-group-item-light{% endif %}">
+          <div class="mb-2">
+            <strong>Expense:</strong> {{ expense.description }} ({{ expense.amount }} {{ expense.currency }})<br>
+            <strong>Group:</strong> {{ expense.group.name }}
+          </div>
+          <div>
+            <strong>Participants Who Haven't Paid:</strong>
+            <ul class="mb-0">
+              {% for participant in expense.unpaid_participants %}
+                <li>{{ participant.user.get_full_name }} (Owes: {{ participant.share }})</li>
+              {% endfor %}
+            </ul>
+          </div>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <div class="text-muted p-3 text-center">
+        No pending payments from your group members.
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,33 @@
+{% extends "core/base.html" %} 
+{% load humanize %} 
+{% load custom_filters %} 
+{% block content %}
+<div class="d2c_main p-4 ps-lg-3">
+  <h2>Notifications</h2>
+
+  <div class="card h-100">
+    <div class="card-body">
+      {% if notifications %}
+      <ul class="list-group">
+        {% for notification in notifications %}
+        <li
+          class="list-group-item d-flex justify-content-between align-items-start {% if not notification.is_read %}list-group-item-warning{% else %}list-group-item-light{% endif %}"
+        >
+          <div>
+            <strong>{{ notification.get_notification_type_display }}</strong
+            ><br />
+            {{ notification.message }}
+          </div>
+          <small class="text-muted text-nowrap"
+            >{{ notification.created_at|naturaltime }}</small
+          >
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <div class="text-muted p-3 text-center">You have no notifications.</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}
