@@ -23,6 +23,10 @@ import threading
 from decimal import Decimal
 from datetime import timedelta
 from django.db.models.functions import TruncMonth
+import csv
+from django.http import HttpResponse,HttpResponseForbidden
+from django.db.models import Exists, OuterRef, Prefetch
+from django.contrib import messages
 
 def signup_view(request):#signup view for new users
     if request.method == 'POST':
@@ -72,16 +76,16 @@ def home_page(request):
     # Recent Expenses
     recent_expenses = Expense.objects.filter( #select all expenses for user
         group__members=user
-    ).order_by('-date')[:3]
+    ).order_by('-date')[:2]
     
     recent_payments = Payment.objects.filter(# latest 3 payments 
     Q(payer=user) | Q(expense__paid_by=user)
     ).order_by('-timestamp')[:3]
 
-    pending_payments = Payment.objects.filter( #payments with status pending
-        Q(payer=user) | Q(expense__paid_by=user), #Q -> where clause
-        status='PENDING'
-    )[:5]
+    #pending_payments = Payment.objects.filter( #payments with status pending
+     #   Q(payer=user) | Q(expense__paid_by=user), #Q -> where clause
+     #   status='PENDING'
+    #)[:5]
     
     # Group Balances
     group_balances = []
@@ -203,14 +207,30 @@ class ExpenseCreateView(CreateView):
 
     def post(self, request, *args, **kwargs):
         self.object = None
+        group_id = request.POST.get('group')
+
+        # Handle "Create New Group" option
+        if group_id == 'create_new':
+            return redirect('core:group_create')  # Redirect to group creation page
+
+        # Validate group existence
+        group = Group.objects.filter(id=group_id).first()
+        if not group:
+            form = self.get_form()
+            form.add_error('group', 'Please select a valid group.')
+            # No valid group, no participants formset either
+            return self.form_invalid(form)
+
+        # Get form and formset now with valid group
         form = self.get_form()
-        group = Group.objects.filter(id=request.POST.get('group')).first()
-        formset = self.get_formset(group, data=request.POST) if group else None
+        formset = self.get_formset(group, data=request.POST)
 
         if form.is_valid() and (formset is None or formset.is_valid()):
             expense = form.save(commit=False)
-            expense.paid_by = request.user  # assign current user here
+            expense.group = group
+            expense.paid_by = request.user
             expense.save()
+
             participants = []
             total_share = 0
             if formset:
@@ -227,8 +247,10 @@ class ExpenseCreateView(CreateView):
                     form.add_error(None, "Total shares must equal the expense amount.")
                     expense.delete()  # Rollback
                     return self.form_invalid(form)
+
             return self.form_valid(form)
-        return self.form_invalid(form)
+
+
 
 
 def load_participant_forms(request):
@@ -429,7 +451,7 @@ def user_report(request):
     groups = user.user_groups.all()
     
     # Prepare data for Chart: sum of expenses by month for last 6 months
-    from django.db.models.functions import TruncMonth
+    
     six_months_ago = now() - timedelta(days=180)
     expenses_by_month = (
         Expense.objects
@@ -457,3 +479,128 @@ def user_report(request):
     }
     
     return render(request, 'core/user_report.html', context)
+
+@login_required
+def download_report(request):
+    user = request.user
+
+    # Gather data for the report (similar to your user_report view)
+    expenses = Expense.objects.filter(paid_by=user).order_by('-date')
+
+    # Create the HttpResponse object with CSV headers.
+    response = HttpResponse(content_type='text/csv')
+    response['Content-Disposition'] = 'attachment; filename="report.csv"'
+
+    writer = csv.writer(response)
+    # Write headers
+    writer.writerow(['Description', 'Amount', 'Category', 'Group', 'Date'])
+
+    # Write data rows
+    for expense in expenses:
+        writer.writerow([
+            expense.description,
+            expense.amount,
+            expense.category,
+            expense.group.name,
+            expense.date.strftime('%Y-%m-%d'),
+        ])
+
+    return response
+
+#pending payments 
+@login_required
+def pending_payments(request):
+    user = request.user
+    
+    
+    
+    # Get expenses where user is owed money (they paid and others haven't settled)
+    expenses_owed = Expense.objects.filter(
+        paid_by=user
+    ).prefetch_related(
+        Prefetch(
+            'expenseparticipant_set',
+            queryset=ExpenseParticipant.objects.filter(settled=False),
+            to_attr='unpaid_particips'
+        )
+    ).annotate(
+        has_unpaid=Exists(
+            ExpenseParticipant.objects.filter(
+                expense=OuterRef('pk'),
+                settled=False
+            )
+        )
+    ).filter(has_unpaid=True)
+    
+    # Get expenses where user owes money (they're an unpaid participant)
+    expenses_owing = Expense.objects.filter(
+        expenseparticipant__user=user,
+        expenseparticipant__settled=False
+    ).distinct().select_related('paid_by')
+    
+    # Calculate totals
+    total_owed = sum(
+        p.share for e in expenses_owed 
+        for p in e.unpaid_particips
+    ) if expenses_owed else 0
+    
+    total_owing = sum(
+        ep.share for e in expenses_owing
+        for ep in e.expenseparticipant_set.filter(user=user, settled=False)
+    ) if expenses_owing else 0
+    
+    context = {
+        'expenses_owed': expenses_owed,
+        'expenses_owing': expenses_owing,
+        'total_owed': total_owed,
+        'total_owing': total_owing,
+    }
+    return render(request, 'core/pending_payments.html', context)
+
+@login_required
+def homepending(request):
+    user = request.user
+
+    # Fetch latest 1 pending payment for the card
+    pending_payments = Payment.objects.filter(
+        Q(payer=user) | Q(expense__paid_by=user),
+        status='PENDING'
+    ).order_by('-timestamp')[:1]
+
+    # Add other context as needed...
+
+    context = {
+        'pending_payments': pending_payments,
+        # other context
+    }
+    return render(request, 'core/home.html', context)
+
+class GroupUpdateView(LoginRequiredMixin, UpdateView):
+    model = Group
+    form_class = GroupForm
+    template_name = 'core/group_form.html'  # reuse your create group form template or create one
+    success_url = reverse_lazy('core:groups')  # redirect after successful edit
+
+    def get_queryset(self):
+        # Optional: restrict editing to groups created by the user
+        return Group.objects.filter(created_by=self.request.user)
+
+    def form_valid(self, form):
+        messages.success(self.request, "Group updated successfully.")
+        return super().form_valid(form)
+    
+@login_required
+def group_delete(request, pk):
+    group = get_object_or_404(Group, pk=pk)
+
+    # Optional: restrict delete to group creator only
+    if group.created_by != request.user:
+        return HttpResponseForbidden("You do not have permission to delete this group.")
+
+    if request.method == 'POST':
+        group.delete()
+        messages.success(request, "Group deleted successfully.")
+        return redirect('core:groups')
+
+    # Optionally handle GET to show confirmation (if not handled in template)
+    return redirect('core:groups')

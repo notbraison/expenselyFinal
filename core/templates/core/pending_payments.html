@@ -1,0 +1,132 @@
+{% extends "core/base.html" %}
+{% load humanize %}
+{% load custom_filters %}
+{% block content %}
+<div class="d2c_main p-4 ps-lg-3">
+  <!-- Page Heading -->
+  <div class="d-sm-flex align-items-center justify-content-between mb-4">
+    <h1 class="h3 mb-0 text-gray-800">Pending Payments</h1>
+  </div>
+
+  <!-- Summary Cards -->
+  <div class="row">
+    <!-- Money Owed to You -->
+    <div class="col-xl-6 col-md-6 mb-4">
+      <div class="card border-left-success shadow h-100 py-2">
+        <div class="card-body">
+          <div class="row no-gutters align-items-center">
+            <div class="col mr-2">
+              <div class="text-xs font-weight-bold text-success text-uppercase mb-1">
+                Money Owed to You
+              </div>
+              <div class="h5 mb-0 font-weight-bold text-gray-800">
+                Ksh.{{ total_owed|floatformat:2 }}
+              </div>
+            </div>
+            <div class="col-auto">
+              <i class="fas fa-arrow-down fa-2x text-gray-300"></i>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Money You Owe -->
+    <div class="col-xl-6 col-md-6 mb-4">
+      <div class="card border-left-danger shadow h-100 py-2">
+        <div class="card-body">
+          <div class="row no-gutters align-items-center">
+            <div class="col mr-2">
+              <div class="text-xs font-weight-bold text-danger text-uppercase mb-1">
+                Money You Owe
+              </div>
+              <div class="h5 mb-0 font-weight-bold text-gray-800">
+                Ksh.{{ total_owing|floatformat:2 }}
+              </div>
+            </div>
+            <div class="col-auto">
+              <i class="fas fa-arrow-up fa-2x text-gray-300"></i>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Owed to You Section -->
+  <div class="card shadow mb-4">
+    <div class="card-header py-3 bg-success text-white">
+      <h6 class="m-0 font-weight-bold">Payments You Should Receive</h6>
+    </div>
+    <div class="card-body">
+      {% if expenses_owed %}
+        <div class="table-responsive">
+          <table class="table table-bordered">
+            <thead>
+              <tr>
+                <th>Expense</th>
+                <th>Date</th>
+                <th>Who Owes</th>
+                <th>Amount</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for expense in expenses_owed %}
+                {% for participant in expense.unpaid_participants %}
+                <tr>
+                  <td>{{ expense.description }}</td>
+                  <td>{{ expense.date|date:"Y-m-d" }}</td>
+                  <td>{{ participant.user.get_full_name }}</td>
+                  <td>Ksh.{{ participant.share|floatformat:2 }}</td>
+                </tr>
+                {% endfor %}
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="text-muted">No pending payments owed to you.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- You Owe Section -->
+  <div class="card shadow mb-4">
+    <div class="card-header py-3 bg-danger text-white">
+      <h6 class="m-0 font-weight-bold">Payments You Need to Make</h6>
+    </div>
+    <div class="card-body">
+      {% if expenses_owing %}
+        <div class="table-responsive">
+          <table class="table table-bordered">
+            <thead>
+              <tr>
+                <th>Expense</th>
+                <th>Date</th>
+                <th>Paid By</th>
+                <th>Your Share</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for expense in expenses_owing %}
+                {% for participant in expense.expenseparticipant_set.all %}
+                  {% if participant.user == request.user and not participant.settled %}
+                  <tr>
+                    <td>{{ expense.description }}</td>
+                    <td>{{ expense.date|date:"Y-m-d" }}</td>
+                    <td>{{ expense.paid_by.get_full_name }}</td>
+                    <td>Ksh.{{ participant.share|floatformat:2 }}</td>
+                  </tr>
+                  {% endif %}
+                {% endfor %}
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      {% else %}
+        <p class="text-muted">No pending payments you need to make.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

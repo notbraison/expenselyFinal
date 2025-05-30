@@ -1,6 +1,0 @@
-| Feature             | Backend                                  | Frontend                      | Notes                      |
-| ------------------- | ---------------------------------------- | ----------------------------- | -------------------------- |
-| Predictive Spending | Expense history analysis + predictions   | Dashboard charts & alerts     | Use simple or advanced ML  |
-| Recurring Payments  | RecurringExpense model + scheduled tasks | Recurring expense setup form  | Automate expense creation  |
-| Payment Plans       | InstallmentPlan model + payment tracking | Expense creation with plan UI | Track installment payments |
-

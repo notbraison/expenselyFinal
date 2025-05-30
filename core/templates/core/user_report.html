@@ -153,6 +153,12 @@
     }
   });
 </script>
+
+<form method="get" action="{% url 'core:download_report' %}" style="position: fixed; bottom: 20px; right: 20px; z-index: 1000;">
+  <button type="submit" class="btn btn-primary">Download Report</button>
+</form>
+
+
 {% endblock %}
 <!-- This template displays a user report with various statistics and charts -->
 <!-- The report includes total expenses, groups joined, payments made, and pending payments -->

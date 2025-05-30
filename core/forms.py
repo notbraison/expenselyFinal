@@ -173,3 +173,15 @@ class GroupForm(forms.ModelForm):
         widgets = {
             'members': forms.SelectMultiple(attrs={'class': 'form-control'}),
         }
+        
+
+
+class GroupForm(forms.ModelForm):
+    class Meta:
+        model = Group
+        fields = ['name', 'description', 'members']
+        widgets = {
+            'members': forms.SelectMultiple(attrs={'class': 'form-control'}),
+            'name': forms.TextInput(attrs={'class': 'form-control'}),
+            'description': forms.Textarea(attrs={'class': 'form-control'}),
+        }
